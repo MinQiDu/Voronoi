@@ -2,6 +2,75 @@
 #include <vector>
 using namespace std;
 
+struct point
+{
+    double x, y;
+};
+struct line
+{
+    double x1, y1, x2, y2;
+};
+class VoronoiFunc
+{ 
+public:
+    point MidPoint(const point& p1, const point& p2)
+    {
+        return {(p1.x + p2.x) / 2.0, (p1.y + p2.y) / 2.0};
+    }
+    point GetCircumCentre(const point& p1, const point& p2, const point& p3)
+    {
+        /* 算中點 */
+        point mid_12 = MidPoint(p1, p2);
+        point mid_23 = MidPoint(p2, p3);
+
+        /* 算{dx, dy}: 方向向量, {-dy, dx}: 法向量{nx, ny} */
+        /* p1 & p2 */
+        double dx_12 = p2.x - p1.x;
+        double dy_12 = p2.y - p1.y;
+        double nx_12 = -dy_12;
+        double ny_12 = dx_12;
+
+        /* p2 & p3 */
+        double dx_23 = p3.x - p2.x;
+        double dy_23 = p3.y - p2.y;
+        double nx_23 = -dy_23;
+        double ny_23 = dx_23;
+
+        // L12: x = mid_12.x + t * nx_12
+        //      y = mid_12.y + t * ny_12
+        // L23: x = mid_23.x + s * nx_23
+        //      y = mid_23.y + s * ny_23
+        // 解聯立方程式, 解 t or s
+        // mid_12.x + t * nx_12 = mid_23.x + s * nx_23
+        // mid_12.y + t * ny_12 = mid_23.y + s * ny_23
+        double ax = nx_12;
+        double bx = -nx_23;
+        double cx = mid_23.x - mid_12.x;
+
+        double ay = ny_12;
+        double by = -ny_23;
+        double cy = mid_23.y - mid_12.y;
+
+        // t*ax + s*bx = cx
+        // t*ay + s*by = cy
+        // 用 Cramer's rule 解 det -> t
+        double det = ax * by - ay * bx;
+
+        if (fabs(det) < 1e-8) // 若det = 0->表示無內積->兩中垂平行->無外心
+        {
+            return { -1, -1 };
+        }
+
+        double t = (bx * cy - by * cx) / det;
+
+        return {mid_12.x + t * nx_12, mid_12.y + t * ny_12};
+    }
+    point GetEndPoint(const point& p1, const point& p2)
+    {
+
+    }
+};
+
 /* 事前宣告 */
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -65,19 +134,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 /* WPARAM : Word Parameter（16/32位）訊息的額外資訊（例如按下的是哪顆鍵）*/
 /* LPARAM : Long Parameter（32/64位）通常包含滑鼠位置等資料*/
 
-struct point /* 自定義point資料結構: {int x, int y} */
-{
-    int x;
-    int y;
-};
+
 vector<point> voronoi_point; /* 儲存點的座標 */
 
 bool enable_mouse_input = false;
 
-struct line
-{
-    double x1, y1, x2, y2;
-};
 vector<line> voronoi_edge; /* 儲存生成的邊 */
 
 bool enable_edge_create = false;
@@ -105,31 +166,30 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
             if (voronoi_point.size() >= 2)
             {
-                for (int i = 0; i < voronoi_point.size() - 1; ++i)
+                if (voronoi_point.size() == 3)
                 {
-                    for (int j = i + 1; j < voronoi_point.size(); ++j)
+                    VoronoiFunc vf;
+                    point p1 = voronoi_point[0];
+                    point p2 = voronoi_point[1];
+                    point p3 = voronoi_point[2];
+                    point circumcentre = vf.GetCircumCentre(p1, p2, p3);
+                    
+                    /* 線段起點{from_x, from_y} & 終點{to_x, to_y} */
+                    double len = 100000.0; // 延伸至無限長
+                    double from_x = circumcentre.x;
+                    double from_y = circumcentre.y;
+                    
+                    for (int i = 0; i < voronoi_point.size() - 1; ++i)
                     {
-                        /* {dx, dy} : 方向向量, {-dy, dx} : 法向量 */
-                        double dx = voronoi_point[j].x - voronoi_point[i].x;
-                        double dy = voronoi_point[j].y - voronoi_point[i].y;
-                        double nx = -dy;
-                        double ny = dx;
-
-                        /* {midx, midy} : 兩點中點 */
-                        double midx = (voronoi_point[i].x + voronoi_point[j].x) / 2.0;
-                        double midy = (voronoi_point[i].y + voronoi_point[j].y) / 2.0;
-
-                        /* 線段起點{from_x, from_y} & 終點{to_x, to_y} */
-                        double len = 100000.0; // 延伸至無限長
-                        double from_x = midx + nx * len;
-                        double from_y = midy + ny * len;
-                        double to_x = midx - nx * len;
-                        double to_y = midy - ny * len;
-
-                        voronoi_edge.push_back({ from_x, from_y, to_x, to_y });
+                        for (int j = i + 1; j < voronoi_point.size(); ++j)
+                        {
+                            point end_point = vf.GetEndPoint(voronoi_point[i], voronoi_point[j]);
+                            double to_x = end_point.x;
+                            double to_y = end_point.y;
+                            voronoi_edge.push_back({ from_x, from_y, to_x, to_y });
+                        }
                     }
                 }
-            }
             InvalidateRect(hwnd, NULL, TRUE);
 
             break;
