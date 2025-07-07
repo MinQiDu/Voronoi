@@ -60,6 +60,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     return 0;
 }
 
+const int canvas_w = 600;
+const int canvas_h = 600;
 struct point
 {
     double x, y;
@@ -235,6 +237,10 @@ public:
             upper_line.y2 = highest_source.y1;
         }
     }
+    bool IsInCanvas(const point& p) // 判斷點是否在畫布內
+    {
+        return (p.x >= 0 && p.x <= canvas_w && p.y >= 0 && p.y <= canvas_h);
+    }
     void CreateVoronoiEdge(vector<point>& vp, HWND hwnd)
     {
         if (vp.size() < 2)
@@ -365,73 +371,83 @@ public:
                     }
                 }
             }
-            /* 畫出hyperplane */
-            point highest_intersec;    // 最高交點: 初始化為中垂線上最下方點
-            line highest_source;       // 最高交點對應的原voronoi_points {x1, y1, x2, y2}
-            int highest_edge_num;      // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
-            point last_intersec = INVALID_POINT;
-            // while (hyperplane超過畫布) do
             // 得到上切線 upper_line = upper_l -> upper_r
-            // 畫出上切線的中垂線M
-            point mid = MidPoint(upper_l, upper_r);
-            double dx = upper_r.x - upper_l.x;
-            double dy = upper_r.y - upper_l.y;
-            double nx = -dy;
-            double ny = dx;
 
-            double from_x;
-            double from_y;
+            /* 畫出hyperplane */
+            point highest_intersec;              // 最高交點: 初始化為中垂線上最下方點
+            line highest_source;                 // 最高交點對應的原voronoi_points {x1, y1, x2, y2}
+            int highest_edge_num;                // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
+            point last_intersec = INVALID_POINT; // 上一輪的交點，作為新一輪中垂線的起點
 
-            if (last_intersec.x == INVALID_POINT.x && last_intersec.y == INVALID_POINT.y) // 第一次執行時
+            // 當初次執行 or 上一輪交點在畫布內時，重複執行
+            while (IsInCanvas(last_intersec) || 
+                (last_intersec.x == INVALID_POINT.x && last_intersec.y == INVALID_POINT.y))
             {
-                from_x = mid.x - nx * 100000.0; 
-                from_y = mid.y - ny * 100000.0;
-            }
-            else // 若不是初次執行，就從上一個交點作為起頭
-            {
-                from_x = last_intersec.x;
-                from_y = last_intersec.y;
-            }
+                // 1. 畫出上切線的中垂線 upper_bisector
+                point mid = MidPoint(upper_l, upper_r);
+                double dx = upper_r.x - upper_l.x;
+                double dy = upper_r.y - upper_l.y;
+                double nx = -dy;
+                double ny = dx;
 
-            double to_x = mid.x + nx * 100000.0;
-            double to_y = mid.y + ny * 100000.0;
-            line upper_bisector = {from_x, from_y, to_x, to_y}; // 當前上切線的中垂線
-            line upper_line = { upper_l.x, upper_l.y, upper_r.x, upper_r.y }; // 當前上切線
+                double from_x;
+                double from_y;
 
-            // 找出此中垂線M與當前voronoi_edge最上面的交點, 因為原點在左上方，因此y值越小越上方
-            // initialization
-            highest_intersec = {from_x, from_y};    // 最高交點: 初始化為中垂線上最下方點
-            highest_source;                         // 最高交點對應的原voronoi_points {x1, y1, x2, y2}
-            highest_edge_num = -1;                  // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
-            for (int i = 0; i < voronoi_edge.size(); ++i) // 遍歷當前所有voronoi_edges
-            {
-                // i <= left.size() - 1 表示點在左側, i > left.size() - 1 表示點在右側
-                point intersec = GetIntersec(upper_bisector, voronoi_edge[i], voronoi_edge_source[i]);
+                if (last_intersec.x == INVALID_POINT.x && last_intersec.y == INVALID_POINT.y) // 第一次執行時
+                {
+                    from_x = mid.x - nx * 100000.0;
+                    from_y = mid.y - ny * 100000.0;
+                }
+                else // 若不是初次執行，就從上一個交點作為起頭
+                {
+                    from_x = last_intersec.x;
+                    from_y = last_intersec.y;
+                }
+
+                double to_x = mid.x + nx * 100000.0;
+                double to_y = mid.y + ny * 100000.0;
+                line upper_bisector = { from_x, from_y, to_x, to_y }; // 當前上切線的中垂線
+                line upper_line = { upper_l.x, upper_l.y, upper_r.x, upper_r.y }; // 當前上切線
+
+                // 2. 找出此中垂線M與當前voronoi_edge最上面的交點, 因為原點在左上方，因此y值越小越上方
+                // initialization
+                highest_intersec = { to_x, to_y };      // 最高交點: 初始化為中垂線上最下方點
+                highest_source = {0, 0, 0, 0};          // 最高交點對應的原voronoi_points {x1, y1, x2, y2}
+                highest_edge_num = -1;                  // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
+                for (int i = 0; i < voronoi_edge.size(); ++i) // 遍歷當前所有voronoi_edges
+                {
+                    // i <= left.size() - 1 表示點在左側, i > left.size() - 1 表示點在右側
+                    point intersec = GetIntersec(upper_bisector, voronoi_edge[i], voronoi_edge_source[i]);
+
+                    if (intersec.x == INVALID_POINT.x && intersec.y == INVALID_POINT.y)
+                    {
+                        continue;                             // 若無交點，跳過
+                    }
+                    else if (intersec.y < highest_intersec.y) // 若此交點高過當前最高交點y值, 更新最高交點
+                    {
+                        highest_intersec = intersec;          // 更新最高交點
+                        highest_source = voronoi_edge_source[i];
+                        highest_edge_num = i;
+                    }
+                }
+                if (highest_edge_num == -1) break; // 無交點，表示離開畫布 or 全部平行，跳出while
+
+                // 更新上切線, 假設此voronoi_edge由左邊的點 upper_l & B 產生，則上切線左邊端點改成 B, upper_l = B
+                DecideNewUpperLine(upper_line, highest_source);
                 
-                if (intersec.x == INVALID_POINT.x && intersec.y == INVALID_POINT.y)
-                {
-                    continue;                             // 若無交點，跳過
-                }
-                else if (intersec.y < highest_intersec.y) // 若此交點高過當前最高交點y值, 更新最高交點
-                {
-                    highest_intersec = intersec;          // 更新最高交點
-                    highest_source = voronoi_edge_source[i];
-                    highest_edge_num = i;
-                }
+                // 更新last_ontersec給下一輪中垂線使用
+                last_intersec = highest_intersec;
+
+                // 中垂線M要從交點被切割，留下上半部
+                upper_bisector = { highest_intersec.x, highest_intersec.y, to_x, to_y };
+
+                // voronoi_edge也從交點被切割，留下從外心到交點的線段
+                double circumcentre_x = voronoi_edge[highest_edge_num].x1; // 保存外心x座標不更改
+                double circumcentre_y = voronoi_edge[highest_edge_num].y1; // 保存外心y座標不更改
+                voronoi_edge[highest_edge_num] = { circumcentre_x, circumcentre_y, highest_intersec.x, highest_intersec.y };
+
+                // hyperplane離開畫布前重複執行以上步驟直到hyperplane離開畫布
             }
-            
-            // 更新上切線, 假設此voronoi_edge由左邊的點 upper_l & B 產生，則上切線左邊端點改成 B, upper_l = B
-            DecideNewUpperLine(upper_line, highest_source);
-
-            // 中垂線M要從交點被切割，留下上半部
-            upper_bisector = { highest_intersec.x, highest_intersec.y, to_x, to_y };
-
-            // voronoi_edge也從交點被切割，留下從外心到交點的線段
-            double circumcentre_x = voronoi_edge[highest_edge_num].x1; // 保存外心x座標不更改
-            double circumcentre_y = voronoi_edge[highest_edge_num].y1; // 保存外心y座標不更改
-            voronoi_edge[highest_edge_num] = {circumcentre_x, circumcentre_y, highest_intersec.x, highest_intersec.y};
-        
-            // hyperplane離開畫布前重複執行以上步驟直到hyperplane離開畫布
         }
     }
 };
@@ -491,7 +507,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         {
             double x = LOWORD(lParam);
             double y = HIWORD(lParam);
-            if (x <= 600) // 限制繪點範圍，避免與點擊按鍵產生衝突，誤產生voronoi point
+            if (x <= canvas_w) // 限制繪點範圍，避免與點擊按鍵產生衝突，誤產生voronoi point
             {
                 voronoi_point.push_back({ x, y }); /* 存入座標 */
                 InvalidateRect(hwnd, NULL, TRUE);
