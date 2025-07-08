@@ -60,7 +60,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     return 0;
 }
 
-const int canvas_w = 600;
+const int canvas_w = 600;                 // 畫布長寬
 const int canvas_h = 600;
 struct point
 {
@@ -70,12 +70,14 @@ struct line
 {
     double x1, y1, x2, y2;
 };
-vector<point> voronoi_point; /* 儲存點的座標 */
+vector<point> voronoi_point;              // 儲存點的座標
 bool enable_mouse_input = false;
-vector<line> voronoi_edge; /* 儲存生成的邊 */
+vector<line> voronoi_edge;                // 儲存生成的邊
 bool enable_edge_create = false;
-vector<line> voronoi_edge_source; /* 儲存生成邊的兩點座標{x1, y1, x2, y2}為了計算 GetIntersec() */
-const point INVALID_POINT = {-1e9, -1e9};
+vector<line> voronoi_edge_source;         // 儲存生成邊的兩點座標{x1, y1, x2, y2}為了計算 GetIntersec()
+vector<line> hyperplane;                  // 儲存要畫出的hyperplane線段
+const point INVALID_POINT = {-1e9, -1e9}; // 設定無效點，供後面判斷有無外心、有無交點
+
 class VoronoiFunc
 {
 public:
@@ -248,7 +250,7 @@ public:
             return;
         }
 
-        else if (vp.size() == 2)
+        if (vp.size() == 2)
         {
             /* 畫中垂線 */
             point p1 = vp[0];
@@ -383,11 +385,11 @@ public:
             while (IsInCanvas(last_intersec) || 
                 (last_intersec.x == INVALID_POINT.x && last_intersec.y == INVALID_POINT.y))
             {
-                // 1. 畫出上切線的中垂線 upper_bisector
+                // (1) 畫出上切線的中垂線 upper_bisector
                 point mid = MidPoint(upper_l, upper_r);
                 double dx = upper_r.x - upper_l.x;
                 double dy = upper_r.y - upper_l.y;
-                double nx = -dy;
+                double nx = -dy; // 法向量
                 double ny = dx;
 
                 double from_x;
@@ -409,14 +411,13 @@ public:
                 line upper_bisector = { from_x, from_y, to_x, to_y }; // 當前上切線的中垂線
                 line upper_line = { upper_l.x, upper_l.y, upper_r.x, upper_r.y }; // 當前上切線
 
-                // 2. 找出此中垂線M與當前voronoi_edge最上面的交點, 因為原點在左上方，因此y值越小越上方
+                // (2) 找出此中垂線與當前voronoi_edge最上面的交點, 因為原點在左上方，因此y值越小越上方
                 // initialization
-                highest_intersec = { to_x, to_y };      // 最高交點: 初始化為中垂線上最下方點
-                highest_source = {0, 0, 0, 0};          // 最高交點對應的原voronoi_points {x1, y1, x2, y2}
-                highest_edge_num = -1;                  // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
+                highest_intersec = { to_x, to_y };            // 最高交點: 初始化為中垂線上最下方點
+                highest_source = {0, 0, 0, 0};                // 最高交點對應的原voronoi_points {x1, y1, x2, y2}
+                highest_edge_num = -1;                        // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
                 for (int i = 0; i < voronoi_edge.size(); ++i) // 遍歷當前所有voronoi_edges
                 {
-                    // i <= left.size() - 1 表示點在左側, i > left.size() - 1 表示點在右側
                     point intersec = GetIntersec(upper_bisector, voronoi_edge[i], voronoi_edge_source[i]);
 
                     if (intersec.x == INVALID_POINT.x && intersec.y == INVALID_POINT.y)
@@ -432,16 +433,18 @@ public:
                 }
                 if (highest_edge_num == -1) break; // 無交點，表示離開畫布 or 全部平行，跳出while
 
-                // 更新上切線, 假設此voronoi_edge由左邊的點 upper_l & B 產生，則上切線左邊端點改成 B, upper_l = B
+                // (3) 更新上切線, 假設此voronoi_edge由左邊的點 upper_l & B 產生，則上切線左邊端點改成 B, upper_l = B
                 DecideNewUpperLine(upper_line, highest_source);
                 
                 // 更新last_ontersec給下一輪中垂線使用
                 last_intersec = highest_intersec;
 
-                // 中垂線M要從交點被切割，留下上半部
-                upper_bisector = { highest_intersec.x, highest_intersec.y, to_x, to_y };
+                // (4) 切割
+                // 中垂線 upper_bisector 要從交點被切割，留下 from -> highest_intersec 這一段
+                upper_bisector = { from_x, from_y, highest_intersec.x, highest_intersec.y };
+                hyperplane.push_back(upper_bisector); // 存入hyperplane線段集
 
-                // voronoi_edge也從交點被切割，留下從外心到交點的線段
+                // voronoi_edge也從交點被切割，留下從外心到交點的線段，直接從voronoi_edge中修改不須另外儲存
                 double circumcentre_x = voronoi_edge[highest_edge_num].x1; // 保存外心x座標不更改
                 double circumcentre_y = voronoi_edge[highest_edge_num].y1; // 保存外心y座標不更改
                 voronoi_edge[highest_edge_num] = { circumcentre_x, circumcentre_y, highest_intersec.x, highest_intersec.y };
@@ -524,7 +527,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_PAINT: /* 畫面繪製 */
     {
         PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hwnd, &ps);
+        HDC hdc = BeginPaint(hwnd, &ps); // 請作業系統傳給我合法、可繪製的 hdc（繪圖上下文），準備好重繪區域
 
         /* 畫出所有點 */
         for (const auto& p : voronoi_point)
@@ -534,13 +537,24 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
         if (enable_edge_create)
         {
-            /* 畫出所有邊 */
-            HPEN hPen = CreatePen(PS_SOLID, 1, RGB(0, 100, 150));
-            HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+            /* 畫出所有 voronoi 邊 */
+            HPEN hPen = CreatePen(PS_SOLID, 1, RGB(0, 100, 150)); // HPEN = Handle Pen
+            HPEN hOldPen = (HPEN)SelectObject(hdc, hPen); // SelectObject() 的回傳值是「原本」使用的 GDI 對象，在這裡是原本的 HPEN，此行目的: 儲存舊的 pen（畫筆）設定，等繪圖完畢後能恢復
             for (const auto& e : voronoi_edge)
             {
                 MoveToEx(hdc, (int)e.x1, (int)e.y1, NULL);
                 LineTo(hdc, (int)e.x2, (int)e.y2);
+            }
+            SelectObject(hdc, hOldPen); // 恢復原本的 pen
+            DeleteObject(hPen);         // 釋放自己建立的 hPen，避免資源洩漏
+
+            /* 畫出所有 hyperplane 邊 */
+            HPEN hPen = CreatePen(PS_SOLID, 1, RGB(150, 100, 0));
+            HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+            for (const auto& h : hyperplane)
+            {
+                MoveToEx(hdc, (int)h.x1, (int)h.y1, NULL);
+                LineTo(hdc, (int)h.x2, (int)h.y2);
             }
             SelectObject(hdc, hOldPen);
             DeleteObject(hPen);
@@ -548,7 +562,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             enable_edge_create = false;
         }
         
-        EndPaint(hwnd, &ps);
+        EndPaint(hwnd, &ps); // 跟作業系統說畫完了，釋放hdc，關閉WM_PAINT 專屬繪圖流程
         break;
     }
 
