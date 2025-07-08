@@ -216,27 +216,40 @@ public:
             return INVALID_POINT; // 回傳無效點
         }
 
-        double t = (cx * by - cy * bx) / det;
+        double t = (cx * by - cy * bx) / det; // 算出t
 
-        return {up_point.x + up_dx * t, up_point.y + up_dy * t}; // 回傳交點座標
+        double intersec_x = up_point.x + up_dx * t; // 交點座標(需判斷是真or假交點)
+        double intersec_y = up_point.y + up_dy * t;
+
+        double x_min = min(voronoi_edge.x1, voronoi_edge.x2); // 設定真實voronoi_edge的x有效範圍
+        double x_max = max(voronoi_edge.x1, voronoi_edge.x2);
+        if (intersec_x >= x_min && intersec_x <= x_max) // 若交點確實落在voronoi_edge而不是虛擬交點
+        {
+            return { up_point.x + up_dx * t, up_point.y + up_dy * t }; // 回傳交點座標
+        }
+        else
+        {
+            return INVALID_POINT; // 若是虛擬延長線上的假交點，則回傳無效點
+        }
     }
-    void DecideNewUpperLine(line& upper_line, const line& highest_source) /* 更新新一輪的上切線 */
+    void DecideNewUpperLine(point& upper_l, point& upper_r, const line& highest_source) /* 更新新一輪的上切線 */
     {
-        if (highest_source.x1 == upper_line.x1 && highest_source.y1 == upper_line.y1) {
-            upper_line.x1 = highest_source.x2;
-            upper_line.y1 = highest_source.y2;
+        if (highest_source.x1 == upper_l.x && highest_source.y1 == upper_l.y) {
+            upper_l.x = highest_source.x2;
+            upper_l.y = highest_source.y2;
+            
         }
-        else if (highest_source.x1 == upper_line.x2 && highest_source.y1 == upper_line.y2) {
-            upper_line.x2 = highest_source.x2;
-            upper_line.y2 = highest_source.y2;
+        else if (highest_source.x1 == upper_r.x && highest_source.y1 == upper_r.y) {
+            upper_r.x = highest_source.x2;
+            upper_r.y = highest_source.y2;
         }
-        else if (highest_source.x2 == upper_line.x1 && highest_source.y2 == upper_line.y1) {
-            upper_line.x1 = highest_source.x1;
-            upper_line.y1 = highest_source.y1;
+        else if (highest_source.x2 == upper_l.x && highest_source.y2 == upper_l.y) {
+            upper_l.x = highest_source.x1;
+            upper_l.y = highest_source.y1;
         }
-        else { // highest_source.x2 == upper_line.x2 && highest_source.y2 == upper_line.y2
-            upper_line.x2 = highest_source.x1;
-            upper_line.y2 = highest_source.y1;
+        else { // highest_source.x2 == upper_r.x && highest_source.y2 == upper_r.y
+            upper_r.x = highest_source.x1;
+            upper_r.y = highest_source.y1;
         }
     }
     bool IsInCanvas(const point& p) // 判斷點是否在畫布內
@@ -262,11 +275,11 @@ public:
             double nx = -dy;
             double ny = dx;
 
-            double from_x = mid.x - nx * 100000.0;
-            double from_y = mid.y - ny * 100000.0;
-            double to_x = mid.x + nx * 100000.0;
-            double to_y = mid.y + ny * 100000.0;
-            voronoi_edge.push_back({ from_x, from_y, to_x, to_y });
+            double from_x = mid.x + nx * 100000.0;
+            double from_y = mid.y + ny * 100000.0;
+            double to_x = mid.x - nx * 100000.0;
+            double to_y = mid.y - ny * 100000.0;
+            voronoi_edge.push_back({ from_x, from_y, to_x, to_y }); // 由畫面上到下
             voronoi_edge_source.push_back({p1.x, p1.y, p2.x, p2.y});
 
             /* output text */
@@ -339,6 +352,20 @@ public:
             vector<point> left(vp.begin(), vp.begin() + cut);
             vector<point> right(vp.begin() + cut, vp.end());
 
+            /* debug output text */
+            /*wchar_t m[256];
+            for (point p : left)
+            {
+                swprintf(m, 256, L"Left point: (%.1f, %.1f)", p.x, p.y);
+                MessageBox(hwnd, m, L"Result", MB_OK);
+            }
+            for (point p : right)
+            {
+                swprintf(m, 256, L"Right point: (%.1f, %.1f)", p.x, p.y);
+                MessageBox(hwnd, m, L"Result", MB_OK);
+            }*/
+            
+
             /* 3. Conquer： Recursion遞迴計算左右兩邊的 Voronoi */
             CreateVoronoiEdge(left, hwnd);
             CreateVoronoiEdge(right, hwnd);
@@ -351,39 +378,49 @@ public:
 			point R = right.front(); // 右邊第一個點
             point upper_l = L;
             point upper_r = R;
-            
-            for (int i = 0; i < left.size() - 1; ++i) // 找左邊最上點
-            {
-                if (i != left.size() - 1) // 略過最後一個點
-                {
-                    if (GetCrossProduct(left[i], upper_l, R) > 0) // 若逆時針排列
-                    {
-                        upper_l = left[i]; // update左邊最上點 = upper_l
-                    }
-                }
-            }
+            line last_upline = { INVALID_POINT.x, INVALID_POINT.y, INVALID_POINT.x, INVALID_POINT.y }; // 用來比對上切線是否已得到最終結果(卡死)
 
-            for (int j = 0; j < right.size() - 1; ++j) // 找右邊最上點
+            while (upper_l.x != last_upline.x1 || upper_l.y != last_upline.y1
+                || upper_r.x != last_upline.x2 || upper_r.y != last_upline.y2)
             {
-                if (j != 0) // 略過第一個點
+                last_upline = { upper_l.x, upper_l.y, upper_r.x, upper_r.y }; // 重要! 紀錄上次的上切線
+
+                for (int i = 0; i < left.size() - 1; ++i) // 找左邊最上點
                 {
-                    if (GetCrossProduct(right[j], upper_r, L) < 0) // 若順時針排列
+                    //if (i != left.size() - 1) // 略過最後一個點
                     {
-                        upper_r = right[j]; // update右邊最上點 = upper_r
+                        if (GetCrossProduct(left[i], upper_l, upper_r) < 0) // 若順時針排列
+                        {
+                            upper_l = left[i]; // update左邊最上點 = upper_l
+                        }
                     }
                 }
+
+                for (int j = 1; j < right.size(); ++j) // 找右邊最上點
+                {
+                    //if (j != 0) // 略過第一個點
+                    {
+                        if (GetCrossProduct(upper_l, upper_r, right[j]) < 0) // 若順時針排列
+                        {
+                            upper_r = right[j]; // update右邊最上點 = upper_r
+                        }
+                    }
+                }
+                // 得到上切線 upper_line = upper_l -> upper_r = { upper_l.x, upper_l.y, upper_r.x, upper_r.y }
             }
-            // 得到上切線 upper_line = upper_l -> upper_r
 
             /* 畫出hyperplane */
             point highest_intersec;              // 最高交點: 初始化為中垂線上最下方點
             line highest_source;                 // 最高交點對應的原voronoi_points {x1, y1, x2, y2}
             int highest_edge_num;                // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
             point last_intersec = INVALID_POINT; // 上一輪的交點，作為新一輪中垂線的起點
+            vector<int> chosed_edge;             // 紀錄被選中的voronoi_edge編號，避免再次被選中產生衝突
 
             // 當初次執行 or 上一輪交點在畫布內時，重複執行
-            while (IsInCanvas(last_intersec) || 
-                (last_intersec.x == INVALID_POINT.x && last_intersec.y == INVALID_POINT.y))
+            for (int i = 0; i < 4; ++i)
+            //while((last_intersec.x == INVALID_POINT.x && last_intersec.y == INVALID_POINT.y))
+            //while (IsInCanvas(last_intersec) || 
+            //    (last_intersec.x == INVALID_POINT.x && last_intersec.y == INVALID_POINT.y))
             {
                 // (1) 畫出上切線的中垂線 upper_bisector
                 point mid = MidPoint(upper_l, upper_r);
@@ -410,31 +447,51 @@ public:
                 double to_y = mid.y + ny * 100000.0;
                 line upper_bisector = { from_x, from_y, to_x, to_y }; // 當前上切線的中垂線
                 line upper_line = { upper_l.x, upper_l.y, upper_r.x, upper_r.y }; // 當前上切線
+                
+                // debug
+                //hyperplane.push_back(upper_line);
+                //hyperplane.push_back(upper_bisector);
 
                 // (2) 找出此中垂線與當前voronoi_edge最上面的交點, 因為原點在左上方，因此y值越小越上方
                 // initialization
                 highest_intersec = { to_x, to_y };            // 最高交點: 初始化為中垂線上最下方點
                 highest_source = {0, 0, 0, 0};                // 最高交點對應的原voronoi_points {x1, y1, x2, y2}
                 highest_edge_num = -1;                        // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
-                for (int i = 0; i < voronoi_edge.size(); ++i) // 遍歷當前所有voronoi_edges
+                for (int i = 0; i < voronoi_edge.size(); ++i) // 遍歷當前所有(未被選擇過)voronoi_edges
                 {
-                    point intersec = GetIntersec(upper_bisector, voronoi_edge[i], voronoi_edge_source[i]);
+                    auto exist = find(chosed_edge.begin(), chosed_edge.end(), i); // 判斷此條線是否已被選過
+                    if (exist == chosed_edge.end()) // 這條edge沒有在chosed_edge中，表示沒被選過，則可開始找交點
+                    {
+                        point intersec = GetIntersec(upper_bisector, voronoi_edge[i], voronoi_edge_source[i]);
 
-                    if (intersec.x == INVALID_POINT.x && intersec.y == INVALID_POINT.y)
-                    {
-                        continue;                             // 若無交點，跳過
+                        if (intersec.x == INVALID_POINT.x && intersec.y == INVALID_POINT.y)
+                        {
+                            continue;                             // 若無交點，跳過
+                        }
+                        else if (intersec.y < highest_intersec.y) // 若此交點高過當前最高交點y值, 更新最高交點
+                        {
+                            highest_intersec = intersec;          // 更新最高交點
+                            highest_source = voronoi_edge_source[i];
+                            highest_edge_num = i;
+                        }
                     }
-                    else if (intersec.y < highest_intersec.y) // 若此交點高過當前最高交點y值, 更新最高交點
+                    else // 若這條edge已被選過
                     {
-                        highest_intersec = intersec;          // 更新最高交點
-                        highest_source = voronoi_edge_source[i];
-                        highest_edge_num = i;
+                        continue; // 跳過此條edge，檢查下一條
                     }
                 }
-                if (highest_edge_num == -1) break; // 無交點，表示離開畫布 or 全部平行，跳出while
+
+                if (highest_edge_num == -1)       // 無交點，表示離開畫布 or 全部平行
+                {
+                    upper_bisector = { from_x, from_y, to_x, to_y }; // 先畫出這條收尾的中垂線
+                    hyperplane.push_back(upper_bisector);
+                    break;                                           // 再跳出while
+                }
+
+                chosed_edge.push_back(highest_edge_num); // 記錄這一輪被選中的voronoi_edge編號
 
                 // (3) 更新上切線, 假設此voronoi_edge由左邊的點 upper_l & B 產生，則上切線左邊端點改成 B, upper_l = B
-                DecideNewUpperLine(upper_line, highest_source);
+                DecideNewUpperLine(upper_l, upper_r, highest_source);
                 
                 // 更新last_ontersec給下一輪中垂線使用
                 last_intersec = highest_intersec;
@@ -445,9 +502,34 @@ public:
                 hyperplane.push_back(upper_bisector); // 存入hyperplane線段集
 
                 // voronoi_edge也從交點被切割，留下從外心到交點的線段，直接從voronoi_edge中修改不須另外儲存
-                double circumcentre_x = voronoi_edge[highest_edge_num].x1; // 保存外心x座標不更改
-                double circumcentre_y = voronoi_edge[highest_edge_num].y1; // 保存外心y座標不更改
-                voronoi_edge[highest_edge_num] = { circumcentre_x, circumcentre_y, highest_intersec.x, highest_intersec.y };
+                double org_from_x = voronoi_edge[highest_edge_num].x1; // 保存original座標
+                double org_from_y = voronoi_edge[highest_edge_num].y1; 
+                double org_to_x = voronoi_edge[highest_edge_num].x2;
+                double org_to_y = voronoi_edge[highest_edge_num].y2;
+
+                // 方向向量from -> to (2點情況: 畫面上 -> 下) (3點情況: 外心 -> 延伸)
+                double org_nx = org_to_x - org_from_x;
+                double org_ny = org_to_y - org_from_y;
+
+                double checkp1_x = highest_intersec.x + org_nx * 1; //(2: 較下面的點) (3: 遠離外心的點)
+                double checkp1_y = highest_intersec.y + org_ny * 1;
+                double checkp2_x = highest_intersec.x - org_nx * 1; //(2: 較上面的點) (3: 靠向外心的點)
+                double checkp2_y = highest_intersec.y - org_ny * 1;
+
+                // (2點情況: 下方點離source點的距離) (3點情況: 遠離外心的點離source點的距離)
+                double dis1 = sqrt(pow(checkp1_x - voronoi_edge_source[highest_edge_num].x1, 2) + pow(checkp1_y - voronoi_edge_source[highest_edge_num].y1, 2));
+                // (2點情況: 上方點離source點的距離) (3點情況: 靠向外心的點離source點的距離)
+                double dis2 = sqrt(pow(checkp2_x - voronoi_edge_source[highest_edge_num].x1, 2) + pow(checkp2_y - voronoi_edge_source[highest_edge_num].y1, 2));
+
+                if (dis1 > dis2) // (2: 表示下方點比較遠->留住上方線段，保留from_x, from_y) (3: 表示遠離外心的點比較遠->留住靠向外心的線段，保留from_x, from_y)
+
+                {
+                    voronoi_edge[highest_edge_num] = { org_from_x, org_from_y, highest_intersec.x, highest_intersec.y };
+                }
+                else // (dis2 > dis1) (2: 表示上方點比較遠->留住下方線段，保留to_x, to_y) (3: 表示靠向外心的點比較遠->留住遠離外心的線段，保留to_x, to_y)
+                {
+                    voronoi_edge[highest_edge_num] = { highest_intersec.x, highest_intersec.y, org_to_x, org_to_y };
+                }
 
                 // hyperplane離開畫布前重複執行以上步驟直到hyperplane離開畫布
             }
@@ -498,6 +580,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             voronoi_point.clear();
             enable_mouse_input = false;
             voronoi_edge.clear();
+            voronoi_edge_source.clear();
+            hyperplane.clear();
             InvalidateRect(hwnd, NULL, TRUE);
             break;
         }
@@ -549,15 +633,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             DeleteObject(hPen);         // 釋放自己建立的 hPen，避免資源洩漏
 
             /* 畫出所有 hyperplane 邊 */
-            HPEN hPen = CreatePen(PS_SOLID, 1, RGB(150, 100, 0));
-            HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+            HPEN hHyperPen = CreatePen(PS_SOLID, 2, RGB(200, 140, 0));
+            HPEN hHyperOldPen = (HPEN)SelectObject(hdc, hHyperPen);
             for (const auto& h : hyperplane)
             {
                 MoveToEx(hdc, (int)h.x1, (int)h.y1, NULL);
                 LineTo(hdc, (int)h.x2, (int)h.y2);
             }
-            SelectObject(hdc, hOldPen);
-            DeleteObject(hPen);
+            SelectObject(hdc, hHyperOldPen);
+            DeleteObject(hHyperPen);
 
             enable_edge_create = false;
         }
