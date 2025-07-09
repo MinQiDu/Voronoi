@@ -1,6 +1,11 @@
 ﻿#include <Windows.h>
 #include <vector>
 #include <algorithm>
+#include <fstream>
+//#include <iostream>
+#include <string>       // for std::string 和 std::stoi
+#include <sstream>      // for std::stringstream（簡稱 ss）
+#include <commdlg.h>    // GetOpenFileName 要用
 using namespace std;
 
 /* 事前宣告 */
@@ -44,8 +49,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         620, 50, 120, 30, hwnd, (HMENU)1, hInstance, NULL);
     CreateWindow(L"BUTTON", L"Execute", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         620, 100, 120, 30, hwnd, (HMENU)2, hInstance, NULL);
-    CreateWindow(L"BUTTON", L"Refresh", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+    CreateWindow(L"BUTTON", L"Load File", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         620, 150, 120, 30, hwnd, (HMENU)3, hInstance, NULL);
+    CreateWindow(L"BUTTON", L"Previous Case", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+        620, 200, 120, 30, hwnd, (HMENU)4, hInstance, NULL);
+    CreateWindow(L"BUTTON", L"Next Case", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+        620, 250, 120, 30, hwnd, (HMENU)5, hInstance, NULL);
+    CreateWindow(L"BUTTON", L"Export Results", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+        620, 300, 120, 30, hwnd, (HMENU)6, hInstance, NULL);
+    CreateWindow(L"BUTTON", L"Refresh", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+        620, 350, 120, 30, hwnd, (HMENU)7, hInstance, NULL);
 
     ShowWindow(hwnd, nCmdShow);        /* 出現視窗 */
     UpdateWindow(hwnd);                /* 重繪視窗 */
@@ -62,20 +75,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 const int canvas_w = 600;                 // 畫布長寬
 const int canvas_h = 600;
-struct point
+
+// 資料結構
+struct point                              
 {
     double x, y;
-};
+};                    
 struct line
 {
     double x1, y1, x2, y2;
 };
+
 vector<point> voronoi_point;              // 儲存點的座標
 bool enable_mouse_input = false;
 vector<line> voronoi_edge;                // 儲存生成的邊
 bool enable_edge_create = false;
 vector<line> voronoi_edge_source;         // 儲存生成邊的兩點座標{x1, y1, x2, y2}為了計算 GetIntersec()
 vector<line> hyperplane;                  // 儲存要畫出的hyperplane線段
+vector<vector<point>> test_cases;         // 儲存每一筆輸入的測資點集
+int current_case = 0;                     // 當前測資點集編號
 const point INVALID_POINT = {-1e9, -1e9}; // 設定無效點，供後面判斷有無外心、有無交點
 
 class VoronoiFunc
@@ -134,7 +152,7 @@ public:
 
         return { mid_12.x + t * nx_12, mid_12.y + t * ny_12 }; // 回傳t對應的L12公式 (若計算s回傳L23公式即可)
     }
-    point GetEndPoint(const point& p1, const point& p2, const point& p_other)
+    line GetEndNxNyMid(const point& p1, const point& p2, const point& p_other)
     {
         /* 算中點 */
         point mid_12 = MidPoint(p1, p2);
@@ -145,9 +163,9 @@ public:
         double nx_12 = -dy_12;
         double ny_12 = dx_12;
 
-        /* 使用點積判斷方向（中點與第三點的向量 * 法向量） */
+        /* 使用點積判斷方向（第三點->中點的向量 * p1&p2法向量） */
         // 幾何意義: v & w 的點積可以看做 w 朝著過原點朝 v 的直線上投影，再將投影長度乘上v的長度
-        // 對 '中點與第三點的向量' & '法向量' 算點積 dot = nx_12 * mid_other_x + ny_12 * mid_other_y 
+        // 對 '第三點->中點的向量' & 'p1&p2法向量' 算點積 dot = nx_12 * mid_other_x + ny_12 * mid_other_y 
 		// 若點積 dot > 0, 代表第三點在當前法向量延伸的反端，則voronoi邊的方向正確，從外心沿著法向量延伸即可
 		// 若點積 dot < 0, 代表第三點在當前法向量延伸的那端，則voronoi邊的方向需要反轉，從外心沿著法向量反向延伸
         double mid_other_x = mid_12.x - p_other.x;              //中點與第三點的x向量 mid_other_x
@@ -161,8 +179,10 @@ public:
             ny_12 = -ny_12;
         }
 
-        /* 回傳遠方延伸點（長度 100000）*/
-        return { mid_12.x + nx_12 * 100000.0, mid_12.y + ny_12 * 100000.0 };
+        /* 回傳end方向向量 */
+        return { nx_12, ny_12, mid_12.x, mid_12.y };
+        /* 回傳end延伸點（長度 100000）*/
+        //return { mid_12.x + nx_12 * 100000.0, mid_12.y + ny_12 * 100000.0 };
     }
     double GetCrossProduct(const point& A, const point& B, const point& C)
     {
@@ -258,6 +278,12 @@ public:
     }
     void CreateVoronoiEdge(vector<point>& vp, HWND hwnd)
     {
+        // 先依照x座標排序
+        sort(vp.begin(), vp.end(), [](const point& a, const point& b)
+            {
+                return a.x < b.x;
+            });
+
         if (vp.size() < 2)
         {
             return;
@@ -297,7 +323,15 @@ public:
             point p2 = vp[1];
             point p3 = vp[2];
             point circumcentre = GetCircumCentre(p1, p2, p3);
-            // if無外心，要特別處理
+
+            // if無外心(共線)，要特別處理 -> 畫出中垂線
+            if (circumcentre.x == INVALID_POINT.x && circumcentre.y == INVALID_POINT.y)
+            {
+                vector<point> p12 = { p1, p2 };
+                vector<point> p23 = { p2, p3 };
+                CreateVoronoiEdge(p12, hwnd);
+                CreateVoronoiEdge(p23, hwnd);
+            }
 
             /* 線段起點{from_x, from_y} & 終點{to_x, to_y} */
             double from_x = circumcentre.x;
@@ -319,9 +353,9 @@ public:
                         }
                     }
 
-                    point end_point = GetEndPoint(vp[i], vp[j], p_other); // 得到 voronoi_edge 要延伸的方向(遠離第三點)
-                    double to_x = end_point.x;
-                    double to_y = end_point.y;
+                    line end_point = GetEndNxNyMid(vp[i], vp[j], p_other); // 得到 voronoi_edge 要延伸的方向(遠離第三點)
+                    double to_x = end_point.x2 + end_point.x1 * 100000.0;  // mid_x + nx * 100000
+                    double to_y = end_point.y2 + end_point.y1 * 100000.0;  // mid_y + ny * 100000
 
                     voronoi_edge.push_back({ from_x, from_y, to_x, to_y });
                     voronoi_edge_source.push_back({ vp[i].x, vp[i].y, vp[j].x, vp[j].y });
@@ -526,11 +560,25 @@ public:
                 {
                     voronoi_edge[highest_edge_num] = { org_from_x, org_from_y, highest_intersec.x, highest_intersec.y };
                 }
-                else // (dis2 > dis1) (2: 表示上方點比較遠->留住下方線段，保留to_x, to_y) (3: 表示靠向外心的點比較遠->留住遠離外心的線段，保留to_x, to_y)
+                else if (dis2 > dis1) // (2: 表示上方點比較遠->留住下方線段，保留to_x, to_y) (3: 表示靠向外心的點比較遠->留住遠離外心的線段，保留to_x, to_y)
                 {
                     voronoi_edge[highest_edge_num] = { highest_intersec.x, highest_intersec.y, org_to_x, org_to_y };
                 }
-
+                else // dis1 = dis2 表示交點在兩點中點上，要特殊處理 用getendpoint
+                {
+                    point A = { org_from_x, org_from_y };     // voronoi兩點
+                    point B = { org_to_x, org_to_y }; 
+                    point Other = { from_x, from_y };         // 中垂線起始點
+                    line end = GetEndNxNyMid(A, B, Other);
+                    if (end.x2 != org_nx || end.y2 != org_ny) // 若得出的延伸方向與原方向向量不同，表示要反轉延伸方向，把原本的from改到to的位置
+                    {
+                        voronoi_edge[highest_edge_num] = { highest_intersec.x, highest_intersec.y, org_from_x, org_from_y };
+                    }
+                    else                                      // 若得出的延伸方向與原方向相同
+                    {
+                        voronoi_edge[highest_edge_num] = { highest_intersec.x, highest_intersec.y, org_to_x, org_to_y };
+                    }
+                }
                 // hyperplane離開畫布前重複執行以上步驟直到hyperplane離開畫布
             }
         }
@@ -556,13 +604,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         {
         case 1: // Mouse Input
         {
-            MessageBox(hwnd, L"Mouse Input Enabled", L"Info", MB_OK);
+            //MessageBox(hwnd, L"Mouse Input Enabled", L"Info", MB_OK);
             enable_mouse_input = true;
             break;
         }
         case 2: // Execute
         {
-            MessageBox(hwnd, L"Execute Clicked", L"Info", MB_OK);
+            //MessageBox(hwnd, L"Execute Clicked", L"Info", MB_OK);
             enable_mouse_input = false;
             enable_edge_create = true;
             voronoi_edge.clear(); /* 清除舊邊 */
@@ -574,9 +622,102 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
             break;
         }
-        case 3: // Refresh
+        case 3: // Load file
         {
-            MessageBox(hwnd, L"Refresh Clicked", L"Info", MB_OK);
+            OPENFILENAME ofn;          // 共用對話框結構
+            TCHAR szFile[260] = { 0 }; // 儲存檔名
+
+            ZeroMemory(&ofn, sizeof(ofn));
+            ofn.lStructSize = sizeof(ofn);
+            ofn.hwndOwner = hwnd;
+            ofn.lpstrFile = szFile;
+            ofn.nMaxFile = sizeof(szFile);
+            ofn.lpstrFilter = TEXT("Text Files\0*.txt\0All Files\0*.*\0");
+            ofn.nFilterIndex = 1;
+            ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+            if (GetOpenFileName(&ofn) == TRUE)
+            {
+                // 使用者選好了檔案，開始讀檔
+                ifstream fin(ofn.lpstrFile);
+                string line;
+                vector<point> each_case;
+                test_cases.clear();
+                current_case = 0;
+
+                while (getline(fin, line)) {
+                    if (line.empty() || line[0] == '#') continue; // 當此行開頭為# or 空白時，跳過
+
+                    int n = stoi(line); // 讀入第一行，n = 此筆測資點數量
+                    if (n == 0) {       // 停止條件
+                        // MessageBox(hwnd, TEXT("讀入點數為零，檔案測試停止"), TEXT("訊息"), MB_OK);
+                        break;
+                    }
+
+                    each_case.clear();
+                    for (int i = 0; i < n; ++i) {     // 重複n次，把此筆測資的點都讀入
+                        while (getline(fin, line)) {
+                            if (line.empty() || line[0] == '#') continue;
+                            stringstream ss(line);    // 把 line 裡的內容（例如一行是 "300 400"）包裝進 stringstream，然後用像 cin 的方式讀出來
+                            double x, y;
+                            ss >> x >> y;             // 會得到 x = 300, y = 400
+                            each_case.push_back({ x, y });
+                            break;
+                        }
+                    }
+
+                    test_cases.push_back(each_case);
+                }
+
+                if (!test_cases.empty()) {
+                    voronoi_point = test_cases[0];
+                    InvalidateRect(hwnd, NULL, TRUE);
+                }
+                // 顯示第一筆測資點集數量及座標供檢查
+                wstring info = L"點數: " + to_wstring(test_cases[0].size()) + L"\n";
+                for (const auto& p : test_cases[0])
+                {
+                    info += L"(" + to_wstring(p.x) + L", " + to_wstring(p.y) + L")\n";
+                }
+                MessageBox(hwnd, info.c_str(), L"Check Points Info", MB_OK); // .c_str(): 將wstring轉成C可讀取的w_char_t
+            }
+
+            break;
+        }
+        case 4: // Previous Case
+        {
+            if (current_case > 0)
+            {
+                current_case--;
+                voronoi_point = test_cases[current_case];
+                enable_mouse_input = false;
+                voronoi_edge.clear();
+                voronoi_edge_source.clear();
+                hyperplane.clear();
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            break;
+        }
+        case 5: // Next Case
+        {
+            if (current_case < test_cases.size() - 1)
+            {
+                current_case++;
+                voronoi_point = test_cases[current_case];
+                enable_mouse_input = false;
+                voronoi_edge.clear();
+                voronoi_edge_source.clear();
+                hyperplane.clear();
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            break;
+        }
+
+        case 6: // Export Results
+
+        case 7: // Refresh
+        {
+            //MessageBox(hwnd, L"Refresh Clicked", L"Info", MB_OK);
             voronoi_point.clear();
             enable_mouse_input = false;
             voronoi_edge.clear();
