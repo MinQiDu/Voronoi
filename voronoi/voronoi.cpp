@@ -56,7 +56,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         620, 200, 120, 30, hwnd, (HMENU)4, hInstance, NULL);
     CreateWindow(L"BUTTON", L"Next Case", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         620, 250, 120, 30, hwnd, (HMENU)5, hInstance, NULL);
-    CreateWindow(L"BUTTON", L"Export Results", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+    CreateWindow(L"BUTTON", L"Ouput Results", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         620, 300, 120, 30, hwnd, (HMENU)6, hInstance, NULL);
     CreateWindow(L"BUTTON", L"Refresh", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         620, 350, 120, 30, hwnd, (HMENU)7, hInstance, NULL);
@@ -284,7 +284,7 @@ public:
     }
     bool IsInCanvas(const point& p) // 判斷點是否在畫布內
     {
-        return (p.x >= 0 && p.x <= canvas_w && p.y >= 0 && p.y <= canvas_h);
+        return (p.y <= canvas_h); // (暫時)只用y座標判斷
     }
     void CreateVoronoiEdge(vector<point>& vp, HWND hwnd)
     {
@@ -406,20 +406,6 @@ public:
             vector<point> left(vp.begin(), vp.begin() + cut);
             vector<point> right(vp.begin() + cut, vp.end());
 
-            /* debug output text */
-            /*wchar_t m[256];
-            for (point p : left)
-            {
-                swprintf(m, 256, L"Left point: (%.1f, %.1f)", p.x, p.y);
-                MessageBox(hwnd, m, L"Result", MB_OK);
-            }
-            for (point p : right)
-            {
-                swprintf(m, 256, L"Right point: (%.1f, %.1f)", p.x, p.y);
-                MessageBox(hwnd, m, L"Result", MB_OK);
-            }*/
-            
-
             /* 3. Conquer： Recursion遞迴計算左右兩邊的 Voronoi */
             CreateVoronoiEdge(left, hwnd);
             CreateVoronoiEdge(right, hwnd);
@@ -469,10 +455,10 @@ public:
             int highest_edge_num;                // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
             point last_intersec = INVALID_POINT; // 上一輪的交點，作為新一輪中垂線的起點
             vector<int> chosed_edge;             // 紀錄被選中的voronoi_edge編號，避免再次被選中產生衝突
+            point intersec;                      // 比較交點上下用
 
             // 當初次執行 or 上一輪交點在畫布內時，重複執行
             for (int i = 0; i < 4; ++i)
-            //while((last_intersec.x == INVALID_POINT.x && last_intersec.y == INVALID_POINT.y))
             //while (IsInCanvas(last_intersec) || 
             //    (last_intersec.x == INVALID_POINT.x && last_intersec.y == INVALID_POINT.y))
             {
@@ -511,12 +497,13 @@ public:
                 highest_intersec = { to_x, to_y };            // 最高交點: 初始化為中垂線上最下方點
                 highest_source = {0, 0, 0, 0};                // 最高交點對應的原voronoi_points {x1, y1, x2, y2}
                 highest_edge_num = -1;                        // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
+                
                 for (int i = 0; i < voronoi_edge.size(); ++i) // 遍歷當前所有(未被選擇過)voronoi_edges
                 {
                     auto exist = find(chosed_edge.begin(), chosed_edge.end(), i); // 判斷此條線是否已被選過
                     if (exist == chosed_edge.end()) // 這條edge沒有在chosed_edge中，表示沒被選過，則可開始找交點
                     {
-                        point intersec = GetIntersec(upper_bisector, voronoi_edge[i], voronoi_edge_source[i]);
+                        intersec = GetIntersec(upper_bisector, voronoi_edge[i], voronoi_edge_source[i]);
 
                         if (intersec.x == INVALID_POINT.x && intersec.y == INVALID_POINT.y)
                         {
@@ -531,6 +518,8 @@ public:
                         else if (intersec.y = highest_intersec.y)
                         {
                             // 如果遇到交點是多線段重疊該如何處理?
+                            // 保留這個交點為last_intersec，使接續的hyperplane順利接上
+                            // 不要存這個原地畫線的hyperplane line
                         }
                     }
                     else // 若這條edge已被選過
@@ -539,15 +528,17 @@ public:
                     }
                 }
 
-                if (highest_edge_num == -1)       // 無交點，表示離開畫布 or 全部平行
+                if (highest_edge_num == -1)       // 無交點，表示為最後一條hyperplane，離開畫布
                 {
-                    upper_bisector = { from_x, from_y, to_x, to_y }; // 先畫出這條收尾的中垂線
+                    upper_bisector = { from_x, from_y, to_x, to_y }; // 畫出這條收尾的中垂線，從last_intersec -> 原本to_x & to_y
                     hyperplane.push_back(upper_bisector);
+                    this_rcs_hyperl.push_back(upper_bisector);
+                    this_rcs_hyperl_src.push_back({ upper_l.x, upper_l.y, upper_r.x, upper_r.y });
                     break;                                           // 再跳出while
                 }
 
                 chosed_edge.push_back(highest_edge_num); // 記錄這一輪被選中的voronoi_edge編號
-                
+
                 // 更新last_ontersec給下一輪中垂線使用
                 last_intersec = highest_intersec;
 
@@ -558,7 +549,7 @@ public:
 
                 // voronoi_edge也從交點被切割，留下從外心到交點的線段，直接從voronoi_edge中修改不須另外儲存
                 double org_from_x = voronoi_edge[highest_edge_num].x1; // 保存original座標
-                double org_from_y = voronoi_edge[highest_edge_num].y1; 
+                double org_from_y = voronoi_edge[highest_edge_num].y1;
                 double org_to_x = voronoi_edge[highest_edge_num].x2;
                 double org_to_y = voronoi_edge[highest_edge_num].y2;
 
@@ -588,7 +579,7 @@ public:
                 else // dis1 = dis2 表示交點在兩點中點上，要特殊處理 用getendpoint
                 {
                     point A = { org_from_x, org_from_y };     // voronoi兩點
-                    point B = { org_to_x, org_to_y }; 
+                    point B = { org_to_x, org_to_y };
                     point Other = { from_x, from_y };         // 中垂線起始點
                     line end = GetEndNxNyMid(A, B, Other);
                     if (end.x2 != org_nx || end.y2 != org_ny) // 若得出的延伸方向與原方向向量不同，表示要反轉延伸方向，把原本的from改到to的位置
@@ -600,10 +591,12 @@ public:
                         voronoi_edge[highest_edge_num] = { highest_intersec.x, highest_intersec.y, org_to_x, org_to_y };
                     }
                 }
-
-                // 裁好的中垂線在下一次recursion要變成voronoi_edge來處理
+                
+                // 不論此次有無找到交點，裁好的中垂線在下一次recursion要變成voronoi_edge來處理
                 this_rcs_hyperl.push_back(upper_bisector); // 暫存
-                this_rcs_hyperl_src.push_back({upper_l.x, upper_l.y, upper_r.x, upper_r.y}); 
+                this_rcs_hyperl_src.push_back({ upper_l.x, upper_l.y, upper_r.x, upper_r.y });
+                // if (intersec.y = highest_intersec.y) // 如果此次交點與上一次一樣，表示中垂線根本在原地打轉
+                // if (intersec.y != highest_intersec.y)   // 交點不同時才需要存入此recursion的中垂線紀錄
                 
                 // (4) 更新上切線, 假設此voronoi_edge由左邊的點 upper_l & B 產生，則上切線左邊端點改成 B, upper_l = B
                 DecideNewUpperLine(upper_l, upper_r, highest_source);
@@ -623,25 +616,21 @@ public:
 };
 
 /* 實際內容 */
-/* HWND : Handle to Window 被操作的視窗編號*/
-/* UINT : Unsigned Int（訊息 ID）事件類型，例如 WM_PAINT, WM_LBUTTONDOWN*/
+/* HWND : Handle to Window 被操作的視窗編號 */
+/* UINT : Unsigned Int（訊息 ID）事件類型，例如 WM_PAINT, WM_LBUTTONDOWN */
 /* WPARAM : Word Parameter（16/32位）訊息的額外資訊（例如按下的是哪顆鍵）*/
-/* LPARAM : Long Parameter（32/64位）通常包含滑鼠位置等資料*/
+/* LPARAM : Long Parameter（32/64位）通常包含滑鼠位置等資料 */
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg) {
     case WM_COMMAND:
     {
-        wchar_t msgbuf[128];
-        swprintf(msgbuf, 128, L"voronoi_point.size = %d", (int)voronoi_point.size());
-        MessageBox(hwnd, msgbuf, L"DEBUG", MB_OK);
+        int button_id = LOWORD(wParam); // 獲取滑鼠點選的按鍵ID
 
-        int button_id = LOWORD(wParam);
         switch(button_id)
         {
         case 1: // Mouse Input
         {
-            //MessageBox(hwnd, L"Mouse Input Enabled", L"Info", MB_OK);
             enable_mouse_input = true;
             voronoi_edge.clear();
             voronoi_edge_source.clear();
@@ -650,7 +639,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         }
         case 2: // Execute
         {
-            //MessageBox(hwnd, L"Execute Clicked", L"Info", MB_OK);
             enable_mouse_input = false;
             enable_edge_create = true;
             voronoi_edge.clear(); /* 清除舊邊 */
@@ -716,8 +704,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                     else // 開頭不是'P'or'E'的字串
                     {
                         int n = stoi(line);         // 讀入第一行，n = 此筆測資點數量
-                        if (n == 0) {               // 停止條件
-                            // MessageBox(hwnd, TEXT("讀入點數為零，檔案測試停止"), TEXT("訊息"), MB_OK);
+                        if (n == 0)                 // 停止條件
+                        {               
                             break;
                         }
 
@@ -839,7 +827,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 fout << "0" << endl;
 
                 fout.close();
-                MessageBox(hwnd, TEXT("已成功輸出結果到 result.txt"), TEXT("輸出成功"), MB_OK);
+                MessageBox(hwnd, TEXT("Output result to result.txt"), TEXT("Output successful"), MB_OK);
             }
             voronoi_point.clear();
             voronoi_edge.clear();
@@ -850,7 +838,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
         case 7: // Refresh
         {
-            //MessageBox(hwnd, L"Refresh Clicked", L"Info", MB_OK);
             enable_mouse_input = false;
             voronoi_point.clear();
             voronoi_edge.clear();
