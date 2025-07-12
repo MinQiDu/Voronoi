@@ -458,11 +458,8 @@ public:
             vector<int> used_edge;               // 紀錄被選中的voronoi_edge編號，避免再次被選中產生衝突
             vector<point> used_inter;            // 紀錄使用過的交點座標
 
-            // 當初次執行 or 上一輪交點在畫布內時，重複執行
-            //for (int i = 0; i < 4; ++i)
+            // 當上次找尋交點的結果為->沒有交點->表示為最後一點了->停止while loop
             while(highest_edge_num != -1)
-            //while (IsInCanvas(last_intersec) || 
-            //    (last_intersec.x == INVALID_POINT.x && last_intersec.y == INVALID_POINT.y))
             {
                 // (1) 畫出上切線的中垂線 upper_bisector
                 point mid = MidPoint(upper_l, upper_r);
@@ -509,7 +506,7 @@ public:
                         continue;                             // 若無交點，跳過
                     }
 
-                    // 檢查此交點是否使用過了
+                    // 檢查此(邊->交點)是否使用過了
                     auto e_exist = find(used_edge.begin(), used_edge.end(), i);   // layer1: 邊是否已使用過; layer2: 此邊對應的交點是否已使用過
                     int idx = distance(used_edge.begin(), e_exist);               // 邊ID對應的index
                     if (e_exist == used_edge.end() || (e_exist != used_edge.end() && used_inter[idx].x != intersec.x && used_inter[idx].y != intersec.y))
@@ -525,7 +522,7 @@ public:
                         {
                             // 如果遇到交點是多線段重疊該如何處理?
                             // 保留這個交點為last_intersec，使接續的hyperplane順利接上
-                            // 不要存這個原地畫線的hyperplane line
+                            // 不要存這個原地畫線的hyperplane line->還沒解決
                         }
                     }
                     else // 若這條(邊->交點)已被選過
@@ -548,7 +545,7 @@ public:
                 // 更新last_ontersec給下一輪中垂線使用
                 last_intersec = highest_intersec;
 
-                // (3) 切割
+                // (3) 裁切
                 // 中垂線 upper_bisector 要從交點被切割，留下 from -> highest_intersec 這一段
                 upper_bisector = { from_x, from_y, highest_intersec.x, highest_intersec.y };
                 hyperplane.push_back(upper_bisector); // 存入hyperplane線段集
@@ -728,7 +725,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
                         test_cases.push_back(each_case);
                     }
-                    
                 }
 
                 if (!test_cases.empty()) {
@@ -767,6 +763,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 hyperplane.clear();
                 InvalidateRect(hwnd, NULL, TRUE);
             }
+            else
+            {
+                MessageBox(hwnd, L"This is the first data", L"Check Points Info", MB_OK);
+            }
             break;
         }
         case 5: // Next Case
@@ -788,6 +788,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 voronoi_edge_source.clear();
                 hyperplane.clear();
                 InvalidateRect(hwnd, NULL, TRUE);
+            }
+            else
+            {
+                MessageBox(hwnd, L"This is the end", L"Check Points Info", MB_OK);
             }
             break;
         }
