@@ -56,7 +56,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         620, 200, 120, 30, hwnd, (HMENU)4, hInstance, NULL);
     CreateWindow(L"BUTTON", L"Next Case", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         620, 250, 120, 30, hwnd, (HMENU)5, hInstance, NULL);
-    CreateWindow(L"BUTTON", L"Ouput Results", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+    CreateWindow(L"BUTTON", L"Ouput Result", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         620, 300, 120, 30, hwnd, (HMENU)6, hInstance, NULL);
     CreateWindow(L"BUTTON", L"Refresh", WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         620, 350, 120, 30, hwnd, (HMENU)7, hInstance, NULL);
@@ -97,9 +97,9 @@ struct line
 };
 
 vector<point> voronoi_point;              // 儲存點的座標
-bool enable_mouse_input = false;
-vector<line> voronoi_edge;                // 儲存生成的邊
-bool enable_edge_create = false;
+bool enable_mouse_input = false;          // on / off 滑鼠輸入
+vector<line> voronoi_edge;                // 儲存要畫出&輸出的的邊
+bool enable_edge_create = false;          // on / off 畫出邊線
 vector<line> voronoi_edge_source;         // 儲存生成邊的兩點座標{x1, y1, x2, y2}為了計算 GetIntersec()
 vector<line> hyperplane;                  // 儲存要畫出的hyperplane線段
 vector<vector<point>> test_cases;         // 儲存每一筆輸入的測資點集
@@ -284,7 +284,7 @@ public:
     }
     bool IsInCanvas(const point& p) // 判斷點是否在畫布內
     {
-        return (p.y <= canvas_h); // (暫時)只用y座標判斷
+        return (p.y <= canvas_h);   // (暫時)只用y座標判斷
     }
     void CreateVoronoiEdge(vector<point>& vp, HWND hwnd)
     {
@@ -452,13 +452,15 @@ public:
             /* 畫出hyperplane */
             point highest_intersec;              // 最高交點: 初始化為中垂線上最下方點
             line highest_source;                 // 最高交點對應的原voronoi_points {x1, y1, x2, y2}
-            int highest_edge_num;                // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
+            int highest_edge_num = -2;           // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
             point last_intersec = INVALID_POINT; // 上一輪的交點，作為新一輪中垂線的起點
-            vector<int> chosed_edge;             // 紀錄被選中的voronoi_edge編號，避免再次被選中產生衝突
             point intersec;                      // 比較交點上下用
+            vector<int> used_edge;               // 紀錄被選中的voronoi_edge編號，避免再次被選中產生衝突
+            vector<point> used_inter;            // 紀錄使用過的交點座標
 
             // 當初次執行 or 上一輪交點在畫布內時，重複執行
-            for (int i = 0; i < 4; ++i)
+            //for (int i = 0; i < 4; ++i)
+            while(highest_edge_num != -1)
             //while (IsInCanvas(last_intersec) || 
             //    (last_intersec.x == INVALID_POINT.x && last_intersec.y == INVALID_POINT.y))
             {
@@ -498,18 +500,22 @@ public:
                 highest_source = {0, 0, 0, 0};                // 最高交點對應的原voronoi_points {x1, y1, x2, y2}
                 highest_edge_num = -1;                        // 擁有最高交點的voronoi_edge編號，紀錄以供裁切，初始值為-1
                 
-                for (int i = 0; i < voronoi_edge.size(); ++i) // 遍歷當前所有(未被選擇過)voronoi_edges
+                for (int i = 0; i < voronoi_edge.size(); ++i) // 遍歷當前所有voronoi_edges
                 {
-                    auto exist = find(chosed_edge.begin(), chosed_edge.end(), i); // 判斷此條線是否已被選過
-                    if (exist == chosed_edge.end()) // 這條edge沒有在chosed_edge中，表示沒被選過，則可開始找交點
-                    {
-                        intersec = GetIntersec(upper_bisector, voronoi_edge[i], voronoi_edge_source[i]);
+                    intersec = GetIntersec(upper_bisector, voronoi_edge[i], voronoi_edge_source[i]);
 
-                        if (intersec.x == INVALID_POINT.x && intersec.y == INVALID_POINT.y)
-                        {
-                            continue;                             // 若無交點，跳過
-                        }
-                        else if (intersec.y < highest_intersec.y) // 若此交點高過當前最高交點y值, 更新最高交點
+                    if (intersec.x == INVALID_POINT.x && intersec.y == INVALID_POINT.y)
+                    {
+                        continue;                             // 若無交點，跳過
+                    }
+
+                    // 檢查此交點是否使用過了
+                    auto e_exist = find(used_edge.begin(), used_edge.end(), i);   // layer1: 邊是否已使用過; layer2: 此邊對應的交點是否已使用過
+                    int idx = distance(used_edge.begin(), e_exist);               // 邊ID對應的index
+                    if (e_exist == used_edge.end() || (e_exist != used_edge.end() && used_inter[idx].x != intersec.x && used_inter[idx].y != intersec.y))
+                    {
+                        // 若這條(邊->交點)沒重複，進入下一步比較是否為最高交點
+                        if (intersec.y < highest_intersec.y)      // 若此交點高過當前最高交點y值, 更新最高交點
                         {
                             highest_intersec = intersec;          // 更新最高交點
                             highest_source = voronoi_edge_source[i];
@@ -522,7 +528,7 @@ public:
                             // 不要存這個原地畫線的hyperplane line
                         }
                     }
-                    else // 若這條edge已被選過
+                    else // 若這條(邊->交點)已被選過
                     {
                         continue; // 跳過此條edge，檢查下一條
                     }
@@ -536,8 +542,8 @@ public:
                     this_rcs_hyperl_src.push_back({ upper_l.x, upper_l.y, upper_r.x, upper_r.y });
                     break;                                           // 再跳出while
                 }
-
-                chosed_edge.push_back(highest_edge_num); // 記錄這一輪被選中的voronoi_edge編號
+                used_edge.push_back(highest_edge_num);
+                used_inter.push_back(highest_intersec); // 記錄這一輪被選中的交點座標，避免後續重複使用
 
                 // 更新last_ontersec給下一輪中垂線使用
                 last_intersec = highest_intersec;
