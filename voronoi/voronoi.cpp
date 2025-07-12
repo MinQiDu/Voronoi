@@ -556,14 +556,35 @@ public:
                 double org_to_x = voronoi_edge[highest_edge_num].x2;
                 double org_to_y = voronoi_edge[highest_edge_num].y2;
 
-                // 方向向量from -> to (2點情況: 畫面上 -> 下) (3點情況: 外心 -> 延伸)
-                double org_nx = org_to_x - org_from_x;
-                double org_ny = org_to_y - org_from_y;
+                // 使用點積處理
+                // voronoi_edge方向向量from -> to (2點情況: 畫面上 -> 下) (3點情況: 外心 -> 延伸)
+                double org_dx = org_to_x - org_from_x;
+                double org_dy = org_to_y - org_from_y;
 
-                double checkp1_x = highest_intersec.x + org_nx * 1; //(2: 較下面的點) (3: 遠離外心的點)
-                double checkp1_y = highest_intersec.y + org_ny * 1;
-                double checkp2_x = highest_intersec.x - org_nx * 1; //(2: 較上面的點) (3: 靠向外心的點)
-                double checkp2_y = highest_intersec.y - org_ny * 1;
+                // bi_dx & bi_dy: 被選取的上切中垂線方向向量
+                double bi_dx = highest_intersec.x - from_x;
+                double bi_dy = highest_intersec.y - from_y;
+
+                // dot > 0 表示voronoi_edge朝原方向不用變(交點->org_to); dot < 0 表示要從(org_from->交點)
+                double dot = org_dx * bi_dx + org_dy * bi_dy;
+
+                if (dot < 0) // 裁切保留另一側線斷作為新的voronoi_edge，(org_from->交點)
+                {
+                    voronoi_edge[highest_edge_num] = { org_from_x, org_from_y, highest_intersec.x, highest_intersec.y };
+                }
+                else if (dot > 0)
+                {
+                    voronoi_edge[highest_edge_num] = {highest_intersec.x, highest_intersec.y, org_to_x, org_to_y};
+                }
+                else // dot = 0 垂直狀況
+                {
+
+                }
+
+                double checkp1_x = highest_intersec.x + org_dx * 1; //(2: 較下面的點) (3: 遠離外心的點)
+                double checkp1_y = highest_intersec.y + org_dy * 1;
+                double checkp2_x = highest_intersec.x - org_dx * 1; //(2: 較上面的點) (3: 靠向外心的點)
+                double checkp2_y = highest_intersec.y - org_dy * 1;
 
                 // (2點情況: 下方點離source點的距離) (3點情況: 遠離外心的點離source點的距離)
                 double dis1 = sqrt(pow(checkp1_x - voronoi_edge_source[highest_edge_num].x1, 2) + pow(checkp1_y - voronoi_edge_source[highest_edge_num].y1, 2));
